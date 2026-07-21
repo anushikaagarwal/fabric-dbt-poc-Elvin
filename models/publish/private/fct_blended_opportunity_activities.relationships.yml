@@ -1,0 +1,40 @@
+fact: fct_blended_opportunity_activities
+grain: one row per activity_id
+relationships:
+  - name: to_opportunity
+    to_model: dim_unified_opportunity
+    from_column: opportunity_number
+    to_column: opportunity_number
+    cardinality: many_to_one
+    cross_filter_direction: single
+    is_active: true
+  - name: to_account
+    to_model: dim_unified_account
+    from_column: account_csn
+    to_column: account_csn
+    cardinality: many_to_one
+    cross_filter_direction: single
+    is_active: true
+  - name: to_owner
+    to_model: dim_unified_employee
+    from_column: ownerid
+    to_column: employee_id
+    cardinality: many_to_one
+    cross_filter_direction: single
+    is_active: true
+    role: owner
+  - name: to_contact
+    to_model: dim_unified_contact
+    from_column: account_contact_csn
+    to_column: contact_csn
+    cardinality: many_to_one
+    cross_filter_direction: single
+    is_active: true
+  - name: to_activity_created_date
+    to_model: dim_date
+    from_column: activity_created_date
+    to_column: date_day
+    cardinality: many_to_one
+    cross_filter_direction: single
+    is_active: true
+    role: activity_created_date

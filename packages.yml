@@ -1,0 +1,3 @@
+packages:
+  - local: "{{ env_var('CLONED_PROJECT_PATH', '/usr/local/airflow') }}/dags/dbt/elementary_utils" # use a local path
+  - local: "{{ env_var('CLONED_PROJECT_PATH', '/usr/local/airflow') }}/dags/dbt/adp_utils"       # use a local path

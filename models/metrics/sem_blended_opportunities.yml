@@ -1,0 +1,116 @@
+version: 2
+
+semantic_models:
+  - name: blended_opportunities
+    description: >
+      Blended sales pipeline covering EDH and ACS Salesforce sources.
+      Grain: one row per (source_system, opportunity_number,
+      line_item_number).
+    model: ref('fct_blended_opportunities')
+    defaults:
+      agg_time_dimension: opportunity_projected_close_date
+
+    entities:
+      # Composite primary key: (source_system, opportunity_number,
+      # line_item_number). Declared as an expr since MetricFlow requires
+      # one primary entity per semantic model.
+      - name: opportunity_line_item
+        type: primary
+        expr: "source_system || '|' || opportunity_number || '|' || line_item_number"
+
+      - name: opportunity_number
+        type: foreign
+      - name: account_csn
+        type: foreign
+      - name: partner_csn
+        type: foreign
+      - name: opportunity_owner_id
+        type: foreign
+      - name: account_owner_id
+        type: foreign
+      - name: quote_number
+        type: foreign
+
+    dimensions:
+      - name: opportunity_projected_close_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: source_system
+        type: categorical
+      - name: solution_division
+        type: categorical
+      - name: focus_segment_group
+        type: categorical
+      - name: focus_segment
+        type: categorical
+      - name: license_type
+        type: categorical
+      - name: offer_type
+        type: categorical
+      - name: sales_motion_category
+        type: categorical
+      - name: action
+        type: categorical
+
+    measures:
+      - name: line_item_acv_usd_total
+        description: "Sum of line-item ACV in USD."
+        agg: sum
+        expr: line_item_acv_usd
+      - name: line_item_weighted_acv_usd_total
+        description: "Sum of stage-weighted line-item ACV in USD."
+        agg: sum
+        expr: line_item_weighted_acv_usd
+      - name: line_item_quantity_total
+        description: "Sum of quantity across all line items."
+        agg: sum
+        expr: quantity
+      - name: opportunity_count
+        description: >
+          Distinct-opportunity count (source_system-namespaced to avoid
+          collisions between EDH and ACS numbering).
+        agg: count_distinct
+        expr: "source_system || '|' || opportunity_number"
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+# Starter set - extend as reporting requirements emerge.
+metrics:
+  - name: total_pipeline_acv_usd
+    description: >
+      Sum of line-item ACV in USD across all blended opportunities.
+      Includes every stage; filter downstream if only open pipeline is needed.
+    label: "Total Pipeline ACV (USD)"
+    type: simple
+    type_params:
+      measure: line_item_acv_usd_total
+
+  - name: total_weighted_pipeline_acv_usd
+    description: >
+      Sum of stage-weighted line-item ACV in USD. Weight is 0.10-1.00
+      based on opportunity_stage_weight.
+    label: "Total Weighted Pipeline ACV (USD)"
+    type: simple
+    type_params:
+      measure: line_item_weighted_acv_usd_total
+
+  - name: opportunity_count
+    description: >
+      Distinct-opportunity count (source_system-namespaced). Counts
+      opportunities, not line items.
+    label: "Opportunity Count"
+    type: simple
+    type_params:
+      measure: opportunity_count
+
+  - name: pipeline_confidence_ratio
+    description: >
+      Weighted ACV divided by raw ACV. Represents the average
+      stage-weighted probability across the pipeline.
+    label: "Pipeline Confidence Ratio"
+    type: ratio
+    type_params:
+      numerator: total_weighted_pipeline_acv_usd
+      denominator: total_pipeline_acv_usd
