@@ -1,0 +1,49 @@
+version: 2
+
+# Fabric POC: all sources live in WH_NBE_SalesSemantic_POC under schema names
+# that mirror Snowflake (edh_shared, dw_salesforce, etc.).
+sources:
+  - name: edh_shared
+    database: WH_NBE_SalesSemantic_POC
+    schema: edh_shared
+    tables:
+      - name: opportunity
+      - name: opportunity_line_item
+      - name: offering
+      - name: account_ced
+      - name: country
+      - name: employee
+      - name: quote
+      - name: monthly_exchange_rate
+      - name: opportunity_task
+      - name: employee_ced
+      - name: finance_calendar
+
+  - name: edh_customer_private
+    database: WH_NBE_SalesSemantic_POC
+    schema: edh_customer_private
+    tables:
+      - name: contact
+
+  - name: sfdc_shared
+    database: WH_NBE_SalesSemantic_POC
+    schema: sfdc_shared
+    tables:
+      - name: opportunity
+
+  - name: dw_salesforce
+    database: WH_NBE_SalesSemantic_POC
+    schema: dw_salesforce
+    tables:
+      - name: dim_salesforce_opportunities
+      - name: dim_salesforce_sales_opportunity_line_items
+      - name: dim_salesforce_accounts
+      - name: dim_salesforce_users
+      - name: dim_salesforce_task
+      - name: dim_salesforce_contact
+
+  - name: dw_revops
+    database: WH_NBE_SalesSemantic_POC
+    schema: dw_revops
+    tables:
+      - name: stg_revops_country_region_map
