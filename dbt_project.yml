@@ -26,13 +26,18 @@ sources:
   +tags: ['sales', 'sales_semantic_models']
 
 models:
+  # Fabric adapter does not implement alter_relation_comment; disable for POC.
   +persist_docs:
-    relation: true
-    columns: true
+    relation: false
+    columns: false
 
   +tags: ['sales', 'sales_semantic_models']
 
   sales_semantic_models:
+    +persist_docs:
+      relation: false
+      columns: false
+
     transform:
       +enabled: true
       # Fabric Warehouse rejects nested CTEs produced when ephemeral models are
@@ -40,11 +45,17 @@ models:
       +materialized: view
       +database: WH_NBE_SalesSemantic_POC
       +schema: sales_transform
+      +persist_docs:
+        relation: false
+        columns: false
 
     publish:
       +enabled: true
       +materialized: table
       +database: WH_NBE_SalesSemantic_POC
+      +persist_docs:
+        relation: false
+        columns: false
       shared:
         +schema: sales_shared
       private:
