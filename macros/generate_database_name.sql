@@ -1,13 +1,14 @@
 {#
-  Fabric Warehouse model routing for the sales semantic POC.
-  Sources omit database in sources.yml and inherit target.database at parse time.
+  Fabric POC: use custom +schema values as-is (sales_transform, sales_shared, etc.).
+  Default dbt concatenates target.schema + custom schema, which produced
+  sales_shared_sales_transform when the Fabric profile schema was sales_shared.
 #}
-{% macro generate_database_name(custom_database_name, node) -%}
+{% macro generate_schema_name(custom_schema_name, node) -%}
 
-    {%- if custom_database_name is none -%}
-        {{ target.database }}
+    {%- if custom_schema_name is none -%}
+        {{ target.schema }}
     {%- else -%}
-        {{ custom_database_name | trim }}
+        {{ custom_schema_name | trim }}
     {%- endif -%}
 
 {%- endmacro %}
