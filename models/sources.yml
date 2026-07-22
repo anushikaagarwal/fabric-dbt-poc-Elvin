@@ -1,0 +1,45 @@
+version: 2
+
+# Fabric POC: sources live in the active warehouse profile under schema names
+# that mirror Snowflake (edh_shared, dw_salesforce, etc.). Database is omitted
+# so dbt renders schema.table (see macros/generate_database_name.sql).
+sources:
+  - name: edh_shared
+    schema: edh_shared
+    tables:
+      - name: opportunity
+      - name: opportunity_line_item
+      - name: offering
+      - name: account_ced
+      - name: country
+      - name: employee
+      - name: quote
+      - name: monthly_exchange_rate
+      - name: opportunity_task
+      - name: employee_ced
+      - name: finance_calendar
+
+  - name: edh_customer_private
+    schema: edh_customer_private
+    tables:
+      - name: contact
+
+  - name: sfdc_shared
+    schema: sfdc_shared
+    tables:
+      - name: opportunity
+
+  - name: dw_salesforce
+    schema: dw_salesforce
+    tables:
+      - name: dim_salesforce_opportunities
+      - name: dim_salesforce_sales_opportunity_line_items
+      - name: dim_salesforce_accounts
+      - name: dim_salesforce_users
+      - name: dim_salesforce_task
+      - name: dim_salesforce_contact
+
+  - name: dw_revops
+    schema: dw_revops
+    tables:
+      - name: stg_revops_country_region_map

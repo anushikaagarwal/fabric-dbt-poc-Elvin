@@ -1,0 +1,142 @@
+semantic_models:
+  - name: blended_opportunity_activities
+    description: >
+      One row per sales activity (call, meeting, email, or task) sourced
+      from EDH opportunity tasks and ACS Salesforce tasks, restricted to
+      completed activities reported from 2026-02-01 onward. Excludes ACS
+      activities on opportunities already represented in EDH.
+    model: ref('fct_blended_opportunity_activities')
+    defaults:
+      agg_time_dimension: activity_created_date
+    entities:
+      - name: activity_id
+        type: primary
+      - name: account_csn
+        type: foreign
+      - name: employee_id
+        type: foreign
+        expr: ownerid
+      - name: contact_csn
+        type: foreign
+        expr: account_contact_csn
+      - name: opportunity_number
+        type: foreign
+    dimensions:
+      - name: activity_created_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: source_system
+        type: categorical
+      - name: new_activity_type
+        type: categorical
+      - name: activity_type
+        type: categorical
+      - name: activity_group
+        type: categorical
+    measures:
+      - name: activity_count
+        description: "Count of activities at the model's grain."
+        agg: count_distinct
+        expr: activity_id
+      - name: call_attempt_outbound_count
+        description: "Sum of outbound customer call attempt flags."
+        agg: sum
+        expr: call_attempt_outbound
+      - name: call_connected_outbound_count
+        description: "Sum of connected outbound customer call flags."
+        agg: sum
+        expr: call_connected_outbound
+      - name: meeting_scheduled_count
+        description: "Sum of newly scheduled customer meeting flags."
+        agg: sum
+        expr: meeting_scheduled
+      - name: meeting_completed_count
+        description: "Sum of completed customer meeting/demo flags."
+        agg: sum
+        expr: meeting_completed
+      - name: email_attempt_outbound_count
+        description: "Sum of outbound customer email flags."
+        agg: sum
+        expr: email_attempt_outbound
+      - name: email_received_count
+        description: "Sum of inbound customer email response flags."
+        agg: sum
+        expr: email_received
+      - name: call_duration_seconds_sum
+        description: "Sum of call duration in seconds, across activities where new_activity_type = 'Call'."
+        agg: sum
+        expr: calldurationinseconds
+
+metrics:
+  - name: total_activities
+    description: "Total count of sales activities (calls, meetings, emails, tasks) across EDH and Construction."
+    label: "Total Activities"
+    type: simple
+    type_params:
+      measure: activity_count
+
+  - name: outbound_call_attempts
+    description: "Count of outbound customer call attempts."
+    label: "Outbound Call Attempts"
+    type: simple
+    type_params:
+      measure: call_attempt_outbound_count
+
+  - name: outbound_calls_connected
+    description: "Count of outbound customer calls that connected, per source-specific outcome lists."
+    label: "Outbound Calls Connected"
+    type: simple
+    type_params:
+      measure: call_connected_outbound_count
+
+  - name: call_connect_rate
+    description: "Share of outbound customer call attempts that connected."
+    label: "Call Connect Rate"
+    type: ratio
+    type_params:
+      numerator: outbound_calls_connected
+      denominator: outbound_call_attempts
+
+  - name: meetings_scheduled
+    description: "Count of newly scheduled customer meetings."
+    label: "Meetings Scheduled"
+    type: simple
+    type_params:
+      measure: meeting_scheduled_count
+
+  - name: meetings_completed
+    description: "Count of completed customer meetings, demos, or discovery calls."
+    label: "Meetings Completed"
+    type: simple
+    type_params:
+      measure: meeting_completed_count
+
+  - name: outbound_email_attempts
+    description: "Count of outbound customer emails sent."
+    label: "Outbound Email Attempts"
+    type: simple
+    type_params:
+      measure: email_attempt_outbound_count
+
+  - name: inbound_emails_received
+    description: "Count of inbound customer email responses received."
+    label: "Inbound Emails Received"
+    type: simple
+    type_params:
+      measure: email_received_count
+
+  - name: total_call_duration_seconds
+    description: "Total call duration in seconds across activities where new_activity_type = 'Call'."
+    label: "Total Call Duration (Seconds)"
+    type: simple
+    type_params:
+      measure: call_duration_seconds_sum
+
+  - name: avg_call_duration_seconds
+    description: "Average call duration in seconds per outbound call attempt (total call duration / outbound call attempts)."
+    label: "Average Call Duration (Seconds)"
+    type: ratio
+    type_params:
+      numerator: total_call_duration_seconds
+      denominator: outbound_call_attempts

@@ -1,0 +1,662 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+models:
+  # intermediate layer (models/transform/intermediate/) --------------------
+  # Cross-source-system unions, dedup, and re-graining. See AGENTS.md /
+  # conventions.md §2.1 for why these live apart from the transform root.
+  - name: transform_blended_opportunities
+    description: >
+      Narrow opportunity + line item fact source at line-item grain.
+      Descriptive opportunity attributes (name, stage grouping, type,
+      qualification fields, tags, partner-led flag, owner names) are NOT
+      projected here - they are resolved downstream via joins to
+      dim_unified_opportunity, dim_unified_account, dim_unified_employee,
+      and dim_date. UNION ALL of EDH and ACS branches with ACS anti-join
+      on opportunity_number to avoid double-counting. Grain: one row per
+      (source_system, opportunity_number, line_item_number).
+    columns:
+      - name: source_system
+        description: "Origin of the row: 'EDH_SFDC' or 'ACS_SFDC'."
+      - name: opportunity_number
+        description: "FK to dim_unified_opportunity.opportunity_number."
+      - name: line_item_number
+        description: "Line-item identifier in the source system (may be NULL on EDH where opportunity_line_item does not match)."
+      - name: account_csn
+        description: "FK to dim_unified_account.account_csn (end-customer)."
+      - name: partner_csn
+        description: "FK to dim_unified_account.account_csn (partner)."
+      - name: opportunity_owner_id
+        description: "FK to dim_unified_employee.employee_id (opportunity owner)."
+      - name: account_owner_id
+        description: "FK to dim_unified_employee.employee_id (account sales rep)."
+      - name: opportunity_projected_close_date
+        description: "FK to dim_date.date_day."
+      - name: line_item_acv_usd
+        description: "Annual contract value for the line item, in USD."
+      - name: line_item_weighted_acv_usd
+        description: "line_item_acv_usd * opportunity_stage_weight (weight duplicated inline from dim_unified_opportunity stage logic)."
+
+  # transform layer -------------------------------------------------------
+  - name: transform_unified_opportunity
+    description: >
+      Conformed opportunity dimension unifying EDH opportunities (with BSD
+      SFDC tags enrichment) and ACS Salesforce opportunities. ACS rows are
+      anti-joined to EDH on opportunity_number so each opportunity_number
+      appears at most once. Grain: one row per opportunity_number.
+    columns:
+      - name: opportunity_number
+        description: "Conformed opportunity number. Primary key."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH_SFDC' or 'ACS_SFDC'."
+      - name: opportunity_id
+        description: "Source-system opportunity primary key (EDH source_record_id / ACS Salesforce id)."
+      - name: opportunity_name
+        description: "Opportunity display name from the source system."
+      - name: raw_stage
+        description: "Original stage string from the source system, before normalization."
+      - name: opportunity_stage
+        description: "Normalized opportunity stage: Stage 1..5, Won, Closed/Lost, or the raw value if unmapped."
+      - name: opportunity_stage_rank
+        description: "Ordinal stage rank 1..6 (0 for unmapped)."
+      - name: opportunity_stage_weight
+        description: "Probability weight applied to line_item_acv_usd (0.10-1.00; 0.00 for unmapped)."
+      - name: opportunity_type
+        description: "Opportunity type as classified in the source system."
+      - name: primary_sales_motion
+        description: "EDH primary sales motion. 'NIL_ACS_SFDC' for ACS rows."
+      - name: forecast_category
+        description: "EDH forecast category. 'NIL_ACS_SFDC' for ACS rows."
+      - name: sales_channel
+        description: "Sales channel classification from the source system."
+      - name: customer_project
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: compelling_event
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: access_to_funds
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: formal_decision_process
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: informal_decision_process
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: unique_business_value
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: opportunity_tags
+        description: "BSD opportunity_tags__c raw value. 'NIL_ACS_SFDC' for ACS rows."
+      - name: is_partner_led
+        description: "'Yes' if opportunity_tags contains 'Partner Led' or 'Led by Partner'; 'No' otherwise. 'NIL_ACS_SFDC' for ACS rows."
+      - name: opportunity_created_date
+        description: "Date the opportunity was created in the source system."
+      - name: opportunity_projected_close_date
+        description: "Projected close date."
+      - name: opportunity_owner_id
+        description: "FK to dim_unified_employee.employee_id (opportunity owner)."
+
+  # publish layer -------------------------------------------------------
+  - name: fct_blended_opportunities
+    description: >
+      Unified sales opportunity fact combining EDH and ACS Salesforce
+      sources. Pass-through of transform_blended_opportunities. Grain:
+      one row per (source_system, opportunity_number, line_item_number).
+      Descriptive attributes are resolved via joins to dim_unified_opportunity,
+      dim_unified_account, dim_unified_employee, and dim_date. Note:
+      line_item_number may be NULL where the EDH LEFT JOIN to
+      opportunity_line_item does not match; grain uniqueness is not
+      currently enforced by test.
+    columns:
+      # ----- provenance -----
+      - name: source_system
+        description: "Origin of the row: 'EDH_SFDC' or 'ACS_SFDC'."
+        tests:
+          - accepted_values:
+              name: fct_blended_opportunities_source_system_values
+              values: ['EDH_SFDC', 'ACS_SFDC']
+
+      # ----- foreign keys to conformed dimensions -----
+      - name: opportunity_number
+        description: "FK to dim_unified_opportunity.opportunity_number."
+        tests:
+          - not_null:
+              name: fct_blended_opportunities_opportunity_number_not_null
+          - relationships:
+              name: fct_blended_opportunities_opportunity_number_fk
+              to: ref('dim_unified_opportunity')
+              field: opportunity_number
+              config:
+                severity: warn
+      - name: line_item_number
+        description: "Line-item identifier in the source system (may be NULL on EDH where opportunity_line_item does not match)."
+      - name: account_csn
+        description: "FK to dim_unified_account.account_csn (end-customer)."
+        tests:
+          - relationships:
+              name: fct_blended_opportunities_account_csn_fk
+              to: ref('dim_unified_account')
+              field: account_csn
+              config:
+                severity: warn
+      - name: partner_csn
+        description: "FK to dim_unified_account.account_csn (partner). Role-playing dimension."
+      - name: opportunity_partner_account_csn
+        description: "Alias of partner_csn, retained for downstream consumers."
+      - name: opportunity_owner_id
+        description: "FK to dim_unified_employee.employee_id (opportunity owner). Role-playing dimension."
+        tests:
+          - relationships:
+              name: fct_blended_opportunities_opportunity_owner_fk
+              to: ref('dim_unified_employee')
+              field: employee_id
+              config:
+                severity: warn
+      - name: account_owner_id
+        description: "FK to dim_unified_employee.employee_id (account sales rep). Role-playing dimension."
+      - name: opportunity_projected_close_date
+        description: "FK to dim_date.date_day. Also serves as the fact's default time dimension."
+        tests:
+          - relationships:
+              name: fct_blended_opportunities_projected_close_date_fk
+              to: ref('dim_date')
+              field: date_day
+              config:
+                severity: warn
+
+      # ----- line item measures -----
+      - name: quantity
+        description: "Line-item quantity from the source system."
+      - name: line_item_acv_usd
+        description: "Annual contract value for the line item, in USD. ACS values converted from source currency via edh_shared.monthly_exchange_rate (latest effective_start_date)."
+      - name: line_item_weighted_acv_usd
+        description: "line_item_acv_usd * opportunity_stage_weight."
+
+      # ----- line-item degenerate dimensions (intrinsic to the line grain) -----
+      - name: offer_type
+        description: "EDH sales_revenue_group_detail. 'NIL_ACS_SFDC' for ACS rows."
+      - name: opportunity_line_status
+        description: "EDH line status. 'NIL_ACS_SFDC' for ACS rows."
+      - name: sales_motion_category
+        description: "EDH sales motion category. 'NIL_ACS_SFDC' for ACS rows."
+      - name: action
+        description: "EDH line action (new, renewal, ...). 'NIL_ACS_SFDC' for ACS rows."
+      - name: license_type
+        description: "EDH access_model. 'NIL_ACS_SFDC' for ACS rows."
+      - name: term
+        description: "EDH line term. 'NIL_ACS_SFDC' for ACS rows."
+
+      # ----- offering (line-item scope) -----
+      - name: sales_motion_product_category
+        description: "EDH offering sales_motion_product_category. 'NIL_ACS_SFDC' for ACS rows."
+      - name: offering_name
+        description: "Offering name (EDH offering.offering_name / ACS subscription_name)."
+      - name: solution_division
+        description: "EDH offering solution_division. 'NIL_ACS_SFDC' for ACS rows."
+      - name: focus_segment_group
+        description: "EDH offering focus_segment_group. Hardcoded 'Emerging Tech' for ACS rows."
+      - name: focus_segment
+        description: "EDH offering focus_segment. Hardcoded 'Construction' for ACS rows."
+
+      # ----- quote (EDH-only, deduped to latest per opportunity) -----
+      - name: quote_number
+        description: "Latest quote number for the opportunity. 'NIL_ACS_SFDC' for ACS rows."
+      - name: quote_partner_account_csn
+        description: "Partner CSN on the latest quote. 'NIL_ACS_SFDC' for ACS rows."
+      - name: quote_status
+        description: "Latest quote status. 'NIL_ACS_SFDC' for ACS rows."
+      - name: quoted_on_date
+        description: "Latest quote date. NULL for ACS rows."
+
+  # intermediate layer (models/transform/intermediate/) --------------------
+  - name: transform_blended_opportunity_activities
+    description: >
+      EDH opportunity task and ACS Salesforce task activity data (calls,
+      meetings, emails) at row grain, with normalized activity typing,
+      derived KPI flags, and derived call detail measures. Descriptive
+      account, owner, contact, and fiscal calendar attributes are NOT
+      projected here - they are resolved downstream via joins to the
+      conformed dimensions (dim_unified_account, dim_unified_employee,
+      dim_unified_contact, dim_date). UNION ALL of EDH and ACS branches,
+      with ACS anti-joined to EDH opportunities to avoid double-counting.
+      Filtered to completed activities created in the trailing 730 days
+      and reported from 2026-02-01 onward. Grain: one row per activity_id.
+    columns:
+      - name: activity_id
+        description: "EDH task_id / ACS Salesforce task_id."
+      - name: source_system
+        description: "Origin of the row: 'EDH' or 'Construction'."
+      - name: account_csn
+        description: "FK to dim_unified_account.account_csn."
+      - name: ownerid
+        description: "FK to dim_unified_employee.employee_id (EDH worker_id / ACS owner_id)."
+      - name: account_contact_csn
+        description: "FK to dim_unified_contact.contact_csn."
+      - name: opportunity_number
+        description: "FK to dim_unified_opportunity.opportunity_number."
+      - name: whatid
+        description: "Raw opportunity pointer from the source system (EDH source_record_id / ACS opportunity id). Retained alongside opportunity_number for source-system traceability."
+      - name: activity_created_date
+        description: "FK to dim_date.date_day."
+      - name: new_activity_type
+        description: "Normalized activity type: Call, Email, Meeting, Chat, Social, Update, or Task."
+      - name: activity_type
+        description: "Direction of the activity: Outbound / Inbound, or a raw cadence subtype when direction cannot be derived."
+      - name: activity_group
+        description: "Classification of the activity as Customer Activity, Partner Activity, or Internal Activity. Derived using account_type (via account source join) and contact email domain at transform time."
+
+  # transform layer -------------------------------------------------------
+  - name: transform_date
+    description: >
+      Date dimension source. One row per calendar date sourced from
+      edh_shared.finance_calendar. Grain: one row per date_day.
+    columns:
+      - name: date_day
+        description: "Calendar date. Primary key of dim_date."
+      - name: fiscal_year_name
+        description: "Fiscal year name, e.g. 'FY26'."
+      - name: fiscal_year_quarter_name
+        description: "Fiscal quarter name, e.g. 'Q1'."
+      - name: month_number_in_fiscal_quarter
+        description: "Month number within the fiscal quarter (1, 2, or 3)."
+      - name: fiscal_quarter
+        description: "Fiscal year and quarter concatenated, e.g. 'FY26-Q1'."
+      - name: fiscal_quarter_month
+        description: "Fiscal quarter with month-in-quarter suffix, e.g. 'FY26-Q1-M1'."
+
+  - name: transform_unified_account
+    description: >
+      Conformed account dimension unifying EDH account_ced (authoritative)
+      with ACS Salesforce accounts (dim_salesforce_accounts). ACS rows are
+      anti-joined to EDH on account_csn so each account_csn appears at most
+      once. Grain: one row per account_csn.
+    columns:
+      - name: account_csn
+        description: "Conformed account CSN. Primary key."
+      - name: account_name
+        description: "Account display name."
+      - name: account_geo
+        description: "Sales geo (region grouping) for the account."
+      - name: account_country
+        description: "Account country name."
+      - name: account_region
+        description: "Sales region name from EDH account_ced. NULL for ACS-only rows."
+      - name: named_account_group
+        description: "Raw named-account group value from EDH (NULL for ACS-only rows)."
+      - name: account_segment
+        description: "named_account_group with Territory / Individual / Unknown collapsed to 'Territory' (NULL for ACS-only rows)."
+      - name: account_type
+        description: "Account type as classified in the source system."
+      - name: parent_account_name
+        description: "Corporate (parent) account name. NULL for ACS-only rows."
+      - name: account_hierarchy_depth
+        description: "Account hierarchy depth from EDH account_ced. NULL for ACS-only rows."
+      - name: account_hierarchy_level
+        description: "Account hierarchy level from EDH account_ced. NULL for ACS-only rows."
+      - name: account_category
+        description: "Account category from EDH account_ced. NULL for ACS-only rows."
+      - name: industry_segment
+        description: "Industry segment from EDH account_ced. NULL for ACS-only rows."
+      - name: is_targeted_account
+        description: "Targeted-account flag from EDH account_ced. NULL for ACS-only rows."
+      - name: account_sales_rep_number
+        description: "Sales rep worker id from EDH account_ced. NULL for ACS-only rows."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+
+  - name: transform_unified_employee
+    description: >
+      Conformed employee dimension unifying EDH active employees
+      (employee_ced.is_active = TRUE, keyed on worker_id) with ACS
+      Salesforce users (dim_salesforce_users, keyed on user_id). Grain:
+      one row per employee_id.
+    columns:
+      - name: employee_id
+        description: "Conformed employee id (EDH worker_id or ACS Salesforce user_id). Primary key."
+      - name: employee_name
+        description: "Preferred/display name of the employee. NULL for ACS-only rows (not sourced)."
+      - name: sales_role
+        description: "Sales role. NULL for ACS-only rows."
+      - name: manager_name
+        description: "Display name of the employee's manager."
+      - name: work_email
+        description: "Work email address of the employee."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+
+  - name: transform_unified_contact
+    description: >
+      Conformed contact dimension unifying EDH customer contacts
+      (edh_customer_private.contact) with ACS Salesforce contacts
+      (dim_salesforce_contact). ACS rows are anti-joined to EDH on
+      contact_csn. Grain: one row per contact_csn. Contains PII.
+    columns:
+      - name: contact_csn
+        description: "Conformed contact CSN. Primary key."
+      - name: contact_first_name
+        description: "First name of the contact."
+      - name: contact_last_name
+        description: "Last name of the contact."
+      - name: contact_email
+        description: "Email address of the contact."
+      - name: contact_phone
+        description: "Phone number of the contact."
+      - name: contact_email_domain
+        description: "Lowercased email domain derived from contact_email."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+
+  # publish layer -------------------------------------------------------
+  - name: fct_blended_opportunity_activities
+    description: >
+      Unified sales activity fact combining EDH opportunity tasks and ACS
+      Salesforce tasks (calls, meetings, emails). Pass-through of
+      transform_blended_opportunity_activities. Grain: one row per
+      activity_id. Restricted access - joined against dim_unified_contact
+      (private) resolves customer contact PII; the fact itself only stores
+      the contact_csn foreign key.
+    columns:
+      # ----- identifiers -----
+      - name: activity_id
+        description: "EDH task_id / ACS Salesforce task_id. Primary key at the model's grain."
+        tests:
+          - not_null:
+              name: fct_blended_opportunity_activities_activity_id_not_null
+      - name: source_system
+        description: "Origin of the row: 'EDH' or 'Construction'."
+        tests:
+          - accepted_values:
+              name: fct_blended_opportunity_activities_source_system_values
+              values: ['EDH', 'Construction']
+
+      # ----- foreign keys to conformed dimensions -----
+      - name: account_csn
+        description: "FK to dim_unified_account.account_csn."
+        tests:
+          - relationships:
+              name: fct_blended_opportunity_activities_account_csn_fk
+              to: ref('dim_unified_account')
+              field: account_csn
+              config:
+                severity: warn
+      - name: ownerid
+        description: "FK to dim_unified_employee.employee_id (EDH worker_id / ACS Salesforce owner_id)."
+        tests:
+          - relationships:
+              name: fct_blended_opportunity_activities_ownerid_fk
+              to: ref('dim_unified_employee')
+              field: employee_id
+              config:
+                severity: warn
+      - name: account_contact_csn
+        description: "FK to dim_unified_contact.contact_csn."
+        tests:
+          - relationships:
+              name: fct_blended_opportunity_activities_account_contact_csn_fk
+              to: ref('dim_unified_contact')
+              field: contact_csn
+              config:
+                severity: warn
+      - name: opportunity_number
+        description: "FK to dim_unified_opportunity.opportunity_number."
+        tests:
+          - relationships:
+              name: fct_blended_opportunity_activities_opportunity_number_fk
+              to: ref('dim_unified_opportunity')
+              field: opportunity_number
+              config:
+                severity: warn
+      - name: whatid
+        description: "Raw opportunity pointer from the source system (EDH source_record_id / ACS opportunity id). Retained alongside opportunity_number for source-system traceability."
+      - name: activity_created_date
+        description: "FK to dim_date.date_day. Also serves as the fact's default time dimension."
+        tests:
+          - relationships:
+              name: fct_blended_opportunity_activities_activity_created_date_fk
+              to: ref('dim_date')
+              field: date_day
+              config:
+                severity: warn
+
+      # ----- activity attributes (intrinsic to the activity event) -----
+      - name: activity_subject
+        description: "Free-text subject line of the activity (EDH subject_line / ACS task_subject)."
+      - name: task_type
+        description: "Raw task type from the source system."
+      - name: task_subtype
+        description: "Raw task subtype from the source system."
+      - name: task_status
+        description: "Raw task status from the source system; upstream filter restricts this to 'Completed'."
+      - name: activity_created_timestamp
+        description: "Timestamp the activity was created in the source system."
+      - name: activity_date
+        description: "Date the activity occurred (EDH task_activity_date / ACS date_activity)."
+      - name: activity_completed_timestamp
+        description: "Timestamp the activity was marked completed."
+      - name: cadence_activity_type
+        description: "Raw cadence/engagement activity type (EDH sales_activity_type / ACS task_type_c)."
+      - name: cadence_activity_sub_type
+        description: "Raw cadence/engagement activity subtype (EDH sales_activity_subtype / ACS call_outcome)."
+      - name: new_activity_type
+        description: "Normalized activity type: Call, Email, Meeting, Chat, Social, Update, or Task."
+      - name: activity_type
+        description: "Direction of the activity: Outbound / Inbound, or a raw cadence subtype when direction cannot be derived."
+      - name: activity_group
+        description: "Classification of the activity as Customer Activity, Partner Activity, or Internal Activity. Derived using dim_unified_account.account_type and dim_unified_contact email domain."
+
+      # ----- call detail -----
+      - name: call_outcome
+        description: "Raw call outcome from the source system. NULL for EDH rows (not sourced)."
+      - name: call_type_raw
+        description: "Raw call type/direction from the source system. NULL for EDH rows (not sourced)."
+      - name: calldisposition
+        description: "Call outcome/disposition, populated only when new_activity_type = 'Call'."
+      - name: calldurationinseconds
+        description: "Call duration in seconds, populated only when new_activity_type = 'Call'. Falls back to activity_completed_timestamp - activity_created_timestamp when the source duration is missing or zero."
+
+      # ----- KPI flags (additive measures) -----
+      - name: call_attempt_outbound
+        description: "1 if the activity is an outbound customer call attempt, else 0."
+      - name: call_connected_outbound
+        description: "1 if the activity is an outbound customer call attempt that connected (per source-specific outcome lists), else 0."
+      - name: meeting_scheduled
+        description: "1 if the activity represents a newly scheduled customer meeting, else 0."
+      - name: meeting_completed
+        description: "1 if the activity represents a completed customer meeting or demo/discovery call, else 0."
+      - name: email_attempt_outbound
+        description: "1 if the activity is an outbound customer email, else 0."
+      - name: email_received
+        description: "1 if the activity is an inbound customer email response, else 0."
+
+  # publish layer - conformed dimensions --------------------------------
+  - name: dim_date
+    description: >
+      Conformed date dimension. Pass-through of transform_date. Grain:
+      one row per calendar day. Downstream facts join their date FK
+      columns (e.g. activity_created_date, opportunity_projected_close_date)
+      to dim_date.date_day.
+    columns:
+      - name: date_day
+        description: "Calendar date. Primary key."
+        tests:
+          - unique:
+              name: dim_date_date_day_unique
+          - not_null:
+              name: dim_date_date_day_not_null
+      - name: fiscal_year_name
+        description: "Fiscal year name, e.g. 'FY26'."
+      - name: fiscal_year_quarter_name
+        description: "Fiscal quarter name, e.g. 'Q1'."
+      - name: month_number_in_fiscal_quarter
+        description: "Month number within the fiscal quarter (1, 2, or 3)."
+      - name: fiscal_quarter
+        description: "Fiscal year and quarter concatenated, e.g. 'FY26-Q1'."
+      - name: fiscal_quarter_month
+        description: "Fiscal quarter with month-in-quarter suffix, e.g. 'FY26-Q1-M1'."
+
+  - name: dim_unified_account
+    description: >
+      Conformed account dimension unifying EDH (authoritative) with ACS
+      Salesforce. Pass-through of transform_unified_account. Grain: one
+      row per account_csn.
+    columns:
+      - name: account_csn
+        description: "Conformed account CSN. Primary key."
+        tests:
+          - unique:
+              name: dim_unified_account_account_csn_unique
+          - not_null:
+              name: dim_unified_account_account_csn_not_null
+      - name: account_name
+        description: "Account display name."
+      - name: account_geo
+        description: "Sales geo (region grouping) for the account."
+      - name: account_country
+        description: "Account country name."
+      - name: account_region
+        description: "Sales region name from EDH. NULL for ACS-only rows."
+      - name: named_account_group
+        description: "Raw named-account group value from EDH (NULL for ACS-only rows)."
+      - name: account_segment
+        description: "named_account_group with Territory / Individual / Unknown collapsed to 'Territory' (NULL for ACS-only rows)."
+      - name: account_type
+        description: "Account type as classified in the source system."
+      - name: parent_account_name
+        description: "Corporate (parent) account name. NULL for ACS-only rows."
+      - name: account_hierarchy_depth
+        description: "Account hierarchy depth from EDH. NULL for ACS-only rows."
+      - name: account_hierarchy_level
+        description: "Account hierarchy level from EDH. NULL for ACS-only rows."
+      - name: account_category
+        description: "Account category from EDH. NULL for ACS-only rows."
+      - name: industry_segment
+        description: "Industry segment from EDH. NULL for ACS-only rows."
+      - name: is_targeted_account
+        description: "Targeted-account flag from EDH. NULL for ACS-only rows."
+      - name: account_sales_rep_number
+        description: "Sales rep worker id from EDH. NULL for ACS-only rows."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+        tests:
+          - accepted_values:
+              name: dim_unified_account_source_system_values
+              values: ['EDH', 'ACS']
+
+  - name: dim_unified_employee
+    description: >
+      Conformed employee dimension unifying EDH active employees with ACS
+      Salesforce users. Pass-through of transform_unified_employee. Grain:
+      one row per employee_id.
+    columns:
+      - name: employee_id
+        description: "Conformed employee id (EDH worker_id or ACS user_id). Primary key."
+        tests:
+          - unique:
+              name: dim_unified_employee_employee_id_unique
+          - not_null:
+              name: dim_unified_employee_employee_id_not_null
+      - name: employee_name
+        description: "Preferred/display name of the employee. NULL for ACS-only rows."
+      - name: sales_role
+        description: "Sales role. NULL for ACS-only rows."
+      - name: manager_name
+        description: "Display name of the employee's manager."
+      - name: work_email
+        description: "Work email address of the employee."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+        tests:
+          - accepted_values:
+              name: dim_unified_employee_source_system_values
+              values: ['EDH', 'ACS']
+
+  - name: dim_unified_contact
+    description: >
+      Conformed contact dimension unifying EDH customer contacts with ACS
+      Salesforce contacts. Pass-through of transform_unified_contact.
+      Grain: one row per contact_csn. **Private** - contains PII (name,
+      email, phone).
+    columns:
+      - name: contact_csn
+        description: "Conformed contact CSN. Primary key."
+        tests:
+          - unique:
+              name: dim_unified_contact_contact_csn_unique
+          - not_null:
+              name: dim_unified_contact_contact_csn_not_null
+      - name: contact_first_name
+        description: "First name of the contact."
+      - name: contact_last_name
+        description: "Last name of the contact."
+      - name: contact_email
+        description: "Email address of the contact."
+      - name: contact_phone
+        description: "Phone number of the contact."
+      - name: contact_email_domain
+        description: "Lowercased email domain derived from contact_email."
+      - name: source_system
+        description: "Which source contributed the row: 'EDH' or 'ACS'."
+        tests:
+          - accepted_values:
+              name: dim_unified_contact_source_system_values
+              values: ['EDH', 'ACS']
+
+  - name: dim_unified_opportunity
+    description: >
+      Conformed opportunity dimension unifying EDH opportunities (with BSD
+      SFDC tags enrichment) and ACS Salesforce opportunities. Pass-through
+      of transform_unified_opportunity. Grain: one row per opportunity_number.
+    columns:
+      - name: opportunity_number
+        description: "Conformed opportunity number. Primary key."
+        tests:
+          - unique:
+              name: dim_unified_opportunity_opportunity_number_unique
+          - not_null:
+              name: dim_unified_opportunity_opportunity_number_not_null
+      - name: source_system
+        description: "Which source contributed the row: 'EDH_SFDC' or 'ACS_SFDC'."
+        tests:
+          - accepted_values:
+              name: dim_unified_opportunity_source_system_values
+              values: ['EDH_SFDC', 'ACS_SFDC']
+      - name: opportunity_id
+        description: "Source-system opportunity primary key."
+      - name: opportunity_name
+        description: "Opportunity display name from the source system."
+      - name: raw_stage
+        description: "Original stage string from the source system."
+      - name: opportunity_stage
+        description: "Normalized opportunity stage: Stage 1..5, Won, Closed/Lost."
+      - name: opportunity_stage_rank
+        description: "Ordinal stage rank 1..6 (0 for unmapped)."
+      - name: opportunity_stage_weight
+        description: "Probability weight (0.10-1.00; 0.00 for unmapped)."
+      - name: opportunity_type
+        description: "Opportunity type as classified in the source system."
+      - name: primary_sales_motion
+        description: "EDH primary sales motion. 'NIL_ACS_SFDC' for ACS rows."
+      - name: forecast_category
+        description: "EDH forecast category. 'NIL_ACS_SFDC' for ACS rows."
+      - name: sales_channel
+        description: "Sales channel classification from the source system."
+      - name: customer_project
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: compelling_event
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: access_to_funds
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: formal_decision_process
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: informal_decision_process
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: unique_business_value
+        description: "EDH qualification field. 'NIL_ACS_SFDC' for ACS rows."
+      - name: opportunity_tags
+        description: "BSD opportunity_tags__c raw value. 'NIL_ACS_SFDC' for ACS rows."
+      - name: is_partner_led
+        description: "'Yes' if opportunity_tags contains 'Partner Led' or 'Led by Partner'; 'No' otherwise. 'NIL_ACS_SFDC' for ACS rows."
+      - name: opportunity_created_date
+        description: "Date the opportunity was created."
+      - name: opportunity_projected_close_date
+        description: "Projected close date."
+      - name: opportunity_owner_id
+        description: "FK to dim_unified_employee.employee_id (opportunity owner)."
