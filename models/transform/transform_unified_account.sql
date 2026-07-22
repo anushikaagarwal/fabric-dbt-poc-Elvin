@@ -12,12 +12,16 @@ WITH edh_accounts AS (
         END                                                             AS account_segment,
         acc.ACCOUNT_TYPE                                                AS account_type,
         acc.CORPORATE_ACCOUNT_NAME                                      AS parent_account_name,
-        acc.ACCOUNT_HIERARCHY_DEPTH                                     AS account_hierarchy_depth,
-        acc.ACCOUNT_HIERARCHY_LEVEL                                     AS account_hierarchy_level,
+        TRY_CAST(acc.ACCOUNT_HIERARCHY_DEPTH AS DECIMAL(18, 0))         AS account_hierarchy_depth,
+        CAST(acc.ACCOUNT_HIERARCHY_LEVEL AS VARCHAR(255))             AS account_hierarchy_level,
         acc.ACCOUNT_CATEGORY                                            AS account_category,
         acc.INDUSTRY_SEGMENT                                            AS industry_segment,
-        acc.IS_TARGETED_ACCOUNT                                         AS is_targeted_account,
-        acc.SALES_REP_NUMBER                                            AS account_sales_rep_number,
+        CASE
+            WHEN acc.IS_TARGETED_ACCOUNT IN (1, '1', 'Y', 'Yes', 'TRUE', 'true') THEN CAST(1 AS BIT)
+            WHEN acc.IS_TARGETED_ACCOUNT IN (0, '0', 'N', 'No', 'FALSE', 'false') THEN CAST(0 AS BIT)
+            ELSE TRY_CAST(acc.IS_TARGETED_ACCOUNT AS BIT)
+        END                                                             AS is_targeted_account,
+        CAST(acc.SALES_REP_NUMBER AS VARCHAR(255))                      AS account_sales_rep_number,
         'EDH'                                                           AS source_system
     FROM {{ source('edh_shared', 'account_ced') }} AS acc
     WHERE acc.ACCOUNT_CSN IS NOT NULL
