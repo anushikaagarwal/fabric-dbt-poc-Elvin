@@ -56,8 +56,8 @@ models:
 seeds:
   +tags: ['sales', 'sales_semantic_models', 'seeds']
   +persist_docs:
-    relation: true
-    columns: true
+    relation: false
+    columns: false
   sales_semantic_models:
     +enabled: true
     +database: WH_NBE_SalesSemantic_POC
