@@ -16,10 +16,16 @@ WITH edh_accounts AS (
         CAST(acc.ACCOUNT_HIERARCHY_LEVEL AS VARCHAR(255))             AS account_hierarchy_level,
         acc.ACCOUNT_CATEGORY                                            AS account_category,
         acc.INDUSTRY_SEGMENT                                            AS industry_segment,
-        CASE
-            WHEN acc.IS_TARGETED_ACCOUNT IN (1, '1', 'Y', 'Yes', 'TRUE', 'true') THEN CAST(1 AS BIT)
-            WHEN acc.IS_TARGETED_ACCOUNT IN (0, '0', 'N', 'No', 'FALSE', 'false') THEN CAST(0 AS BIT)
-            ELSE TRY_CAST(acc.IS_TARGETED_ACCOUNT AS BIT)
+        CASE UPPER(LTRIM(RTRIM(CAST(acc.IS_TARGETED_ACCOUNT AS VARCHAR(50)))))
+            WHEN '1' THEN CAST(1 AS BIT)
+            WHEN 'Y' THEN CAST(1 AS BIT)
+            WHEN 'YES' THEN CAST(1 AS BIT)
+            WHEN 'TRUE' THEN CAST(1 AS BIT)
+            WHEN '0' THEN CAST(0 AS BIT)
+            WHEN 'N' THEN CAST(0 AS BIT)
+            WHEN 'NO' THEN CAST(0 AS BIT)
+            WHEN 'FALSE' THEN CAST(0 AS BIT)
+            ELSE NULL
         END                                                             AS is_targeted_account,
         CAST(acc.SALES_REP_NUMBER AS VARCHAR(255))                      AS account_sales_rep_number,
         'EDH'                                                           AS source_system
